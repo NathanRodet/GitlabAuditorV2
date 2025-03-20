@@ -22,30 +22,42 @@ class Job:
     self.id = id
 
 
-def fetch_groups(token, url):
-  groups = []
+def fetch_paginated_data(url, token, params=None):
+  if params is None:
+    params = {}
+  
+  all_data = []
   page = 1
   
   while True:
+    page_params = {**params, "per_page": "100", "page": str(page)}
     response = requests.get(
-      f"{url}/groups",
+      url,
       headers={PRIVATE_TOKEN_HEADER: token},
-      params={
-        "all_available": "true",
-        "per_page": "100",
-        "page": str(page),
-        "min_access_level": MIN_ACCESS_LEVEL_GUEST,
-        "include_subgroups": "true"
-      }
+      params=page_params
     )
     response.raise_for_status()
     data = response.json()
-    groups.extend([Group(g["id"], g["name"]) for g in data])
+    all_data.extend(data)
     
     next_page = response.headers.get("x-next-page")
     if not next_page or len(data) < 100:
       break
     page = int(next_page)
+  
+  return all_data
+
+
+def fetch_groups(token, url):
+  base_url = f"{url}/groups"
+  params = {
+    "all_available": "true",
+    "min_access_level": MIN_ACCESS_LEVEL_GUEST,
+    "include_subgroups": "true"
+  }
+  
+  data = fetch_paginated_data(base_url, token, params)
+  groups = [Group(g["id"], g["name"]) for g in data]
   
   print(f"[bold blue]Fetched {len(groups)} groups.[/bold blue]")
   return groups
@@ -62,56 +74,28 @@ def fetch_projects_from_groups(token, url, groups):
 
 
 def fetch_projects_for_single_group(token, url, group):
-  projects = []
-  page = 1
+  base_url = f"{url}/groups/{group.id}/projects"
+  params = {
+    "all_available": "true",
+    "min_access_level": MIN_ACCESS_LEVEL_GUEST,
+    "include_subgroups": "true"
+  }
   
-  while True:
-    response = requests.get(
-      f"{url}/groups/{group.id}/projects",
-      headers={PRIVATE_TOKEN_HEADER: token},
-      params={
-        "all_available": "true",
-        "per_page": "100",
-        "page": str(page),
-        "min_access_level": MIN_ACCESS_LEVEL_GUEST,
-        "include_subgroups": "true"
-      }
-    )
-    response.raise_for_status()
-    data = response.json()
-    projects.extend([Project(p["id"], p["name"]) for p in data])
-    
-    next_page = response.headers.get("x-next-page")
-    if not next_page or len(data) < 100:
-      break
-    page = int(next_page)
+  data = fetch_paginated_data(base_url, token, params)
+  projects = [Project(p["id"], p["name"]) for p in data]
   
-  print(f"[bold blue]Fetched {len(projects)} projects for group {group.name}.[/bold blue]")
+  print(f"[blue]  Fetched {len(projects)} projects for group {group.name}.[/blue]")
   return projects
 
 
 def fetch_jobs_for_single_project(token, url, project):
-  jobs = []
-  page = 1
+  base_url = f"{url}/projects/{project.id}/jobs"
+  params = {
+    "scope[]": ["success", "failed", "canceled"]
+  }
   
-  while True:
-    response = requests.get(
-      f"{url}/projects/{project.id}/jobs",
-      headers={PRIVATE_TOKEN_HEADER: token},
-      params={
-        "per_page": "100",
-        "page": str(page),
-        "scope[]": ["success", "failed", "canceled"]
-      }
-    )
-    response.raise_for_status()
-    data = response.json()
-    jobs.extend([Job(j["id"]) for j in data])
-    
-    next_page = response.headers.get("x-next-page")
-    if not next_page or len(data) < 100:
-      break
-    page = int(next_page)
+  data = fetch_paginated_data(base_url, token, params)
+  jobs = [Job(j["id"]) for j in data]
   
   print(f"[bold blue]Fetched {len(jobs)} jobs for project {project.name}.[/bold blue]")
   return jobs
@@ -132,19 +116,29 @@ def fetch_job_trace(token, url, project_id, job_id):
 
 def fetch_job_traces_for_projects(token, url, projects):
   os.makedirs("results/log_traces", exist_ok=True)
-  print("[bold blue]Starting to fetch job traces...[/bold blue]")
+  print("[blue] Starting to fetch job traces...[/blue]")
   
   for project in projects:
     jobs = fetch_jobs_for_single_project(token, url, project)
-    project_dir = f"results/log_traces/{project.name.replace('/', '_')}"
+    
+    safe_project_name = project.name.replace('/', '_')
+    project_dir = f"results/log_traces/{safe_project_name}"
     os.makedirs(project_dir, exist_ok=True)
     
+    if not jobs:
+      print(f"[blue]  No trace for jobs in {project.name} project to be saved[/blue]")
+      continue
+      
     for job in jobs:
       try:
         trace = fetch_job_trace(token, url, project.id, job.id)
         clean_trace = clean_ansi_codes(trace)
-        with open(f"{project_dir}/{job.id}.txt", "w", encoding="utf-8", errors="replace") as file:
+        
+        trace_path = f"{project_dir}/{job.id}.txt"
+        with open(trace_path, "w", encoding="utf-8", errors="replace") as file:
           file.write(clean_trace)
-        print(f"[blue]  Saved trace for job {job.id}[/blue]")
+          
+        print(f"\r[blue]  Saved trace for job {job.id} ({jobs.index(job) + 1}/{len(jobs)})[/blue]".ljust(80), end="\r")
       except Exception as e:
-        print(f"[red]Failed to fetch trace for job {job.id}: {e}[/red]")
+        print(f"[red]Failed to fetch trace for job {job.id}: {str(e)}[/red]")
+    
