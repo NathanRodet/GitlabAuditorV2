@@ -1,0 +1,6 @@
+click
+rich
+validators
+urllib3
+typing
+requests
