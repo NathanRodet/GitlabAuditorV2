@@ -7,15 +7,18 @@ PRIVATE_TOKEN_HEADER = "PRIVATE-TOKEN"
 MIN_ACCESS_LEVEL_GUEST = "10"
 GITLAB_API_PATH = "/api/v4"
 
+
 class Group:
   def __init__(self, id, name):
     self.id = id
     self.name = name
 
+
 class Project:
   def __init__(self, id, name):
     self.id = id
     self.name = name
+
 
 class Job:
   def __init__(self, id):
@@ -23,9 +26,7 @@ class Job:
 
 
 def fetch_paginated_data(url, token, params=None):
-  if params is None:
-    params = {}
-  
+  params = params or {}
   all_data = []
   page = 1
   
@@ -63,16 +64,6 @@ def fetch_groups(token, url):
   return groups
 
 
-def fetch_projects_from_groups(token, url, groups):
-  projects = []
-  
-  for group in groups:
-    projects.extend(fetch_projects_for_single_group(token, url, group))
-  
-  print(f"[bold blue]Fetched {len(projects)} projects across all groups.[/bold blue]")
-  return projects
-
-
 def fetch_projects_for_single_group(token, url, group):
   base_url = f"{url}/groups/{group.id}/projects"
   params = {
@@ -85,6 +76,16 @@ def fetch_projects_for_single_group(token, url, group):
   projects = [Project(p["id"], p["name"]) for p in data]
   
   print(f"[blue]  Fetched {len(projects)} projects for group {group.name}.[/blue]")
+  return projects
+
+
+def fetch_projects_from_groups(token, url, groups):
+  projects = []
+  
+  for group in groups:
+    projects.extend(fetch_projects_for_single_group(token, url, group))
+  
+  print(f"[bold blue]Fetched {len(projects)} projects across all groups.[/bold blue]")
   return projects
 
 
@@ -115,8 +116,7 @@ def fetch_job_trace(token, url, project_id, job_id):
 
 
 def fetch_job_traces_for_projects(token, url, projects):
-  os.makedirs("results/log_traces", exist_ok=True)
-  print("[blue] Starting to fetch job traces...[/blue]")
+  print("[bold blue]Starting to fetch job traces...[/bold blue]")
   
   for project in projects:
     jobs = fetch_jobs_for_single_project(token, url, project)
@@ -129,7 +129,7 @@ def fetch_job_traces_for_projects(token, url, projects):
       print(f"[blue]  No trace for jobs in {project.name} project to be saved[/blue]")
       continue
       
-    for job in jobs:
+    for i, job in enumerate(jobs):
       try:
         trace = fetch_job_trace(token, url, project.id, job.id)
         clean_trace = clean_ansi_codes(trace)
@@ -138,7 +138,27 @@ def fetch_job_traces_for_projects(token, url, projects):
         with open(trace_path, "w", encoding="utf-8", errors="replace") as file:
           file.write(clean_trace)
           
-        print(f"\r[blue]  Saved trace for job {job.id} ({jobs.index(job) + 1}/{len(jobs)})[/blue]".ljust(80), end="\r")
+        print(f"\r[blue]  Saved trace for job {job.id} ({i + 1}/{len(jobs)})[/blue]".ljust(80), end="\r")
       except Exception as e:
         print(f"[red]Failed to fetch trace for job {job.id}: {str(e)}[/red]")
+
+
+def run(token, url):
+  try:
+    groups = fetch_groups(token, url)
+    if not groups:
+      print("[bold yellow]No groups found[/bold yellow]")
+      return 0
+  except Exception as e:
+    print(f"[bold red]Error fetching groups: {e}[/bold red]")
+    return 1
+
+  try:
+    projects = fetch_projects_from_groups(token, url, groups)
+    if not projects:
+      return 0
+  except Exception as e:
+    print(f"[bold red]Error fetching projects: {e}[/bold red]")
+    return 1
     
+  return projects
